@@ -273,33 +273,3 @@ cp .env.example .env
 # Заполнить .env
 uv run python main.py
 ```
-
-### Через deploy.sh
-
-```bash
-bash deploy.sh user@server:/opt/cipher
-```
-
-### Ручной перенос
-
-```bash
-# Упаковать (без секретов и кэша)
-tar czf cipher.tar.gz \
-  --exclude='__pycache__' \
-  --exclude='.venv' \
-  --exclude='.env' \
-  --exclude='.git' \
-  --exclude='*.pyc' \
-  --exclude='positions.json' \
-  --exclude='processed_signals.json' \
-  --exclude='signal_history.json' \
-  --exclude='closed_positions.csv' \
-  .
-
-scp cipher.tar.gz user@server:/opt/
-ssh user@server "mkdir -p /opt/cipher && tar xzf /opt/cipher.tar.gz -C /opt/cipher"
-```
-
-## Лицензия
-
-Private / All rights reserved.

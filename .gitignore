@@ -39,6 +39,7 @@ closed_positions.csv
 
 
 # Misc
-script/
+script
 *.log
+best_config.md
 
