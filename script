@@ -1,0 +1,110 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
+// © LuxAlgo
+
+//@version=5
+indicator(
+     "MAIN SCRIPT (LONG & SHORT SIGNALS)"
+   , overlay=true
+   , max_lines_count=500
+   , max_labels_count=500
+   , max_bars_back=500
+     )
+
+// Settings
+h       = input.float(8., 'Bandwidth', minval=0)
+mult    = input.float(3., minval=0)
+src     = input(close, 'Source')
+
+repaint = input(
+     true
+   , 'Repainting Smoothing'
+   , tooltip='Repainting is an effect where the indicator\'s historical output is subject to change over time. Disabling repainting will cause the indicator to output the endpoints of the calculations'
+     )
+
+// Style
+upCss = input.color(color.teal  , 'Colors', inline='inline1', group='Style')
+dnCss = input.color(color.red   , ''      , inline='inline1', group='Style')
+
+// Gaussian window function
+gauss(x, h) => math.exp(-(math.pow(x, 2) / (h * h * 2)))
+
+// Calculations
+var coefs = array.new_float(0)
+var den   = 0.
+
+if barstate.isfirst
+    for i = 0 to 499
+        w = gauss(i, h)
+        array.push(coefs, w)
+    den := array.sum(coefs)
+
+out = 0.
+for i = 0 to 499
+    out += src[i] * array.get(coefs, i)
+out /= den
+
+mae = ta.sma(math.abs(src - out), 499) * mult
+
+upper = out + mae
+lower = out - mae
+
+// Plot upper and lower bands
+plot(upper, "Upper", color=color.teal)
+plot(lower, "Lower", color=color.red)
+
+// ================ LONG SIGNALS (ПОКУПКА) ================
+long_signal_1 = high >= lower and low <= lower  // касание нижней полосы
+long_signal_2 = close < lower                    // закрытие ниже нижней полосы
+long_signal = long_signal_1 or long_signal_2
+
+// Рисуем сигналы на покупку (зеленые треугольники ВВЕРХ снизу)
+plotshape(
+     long_signal
+   , title="LONG SIGNAL"
+   , location=location.belowbar
+   , color=color.green
+   , style=shape.triangleup
+   , size=size.small
+   )
+
+// ================ SHORT SIGNALS (ПРОДАЖА) ================
+short_signal_1 = high >= upper and low <= upper  // касание верхней полосы
+short_signal_2 = close > upper                    // закрытие выше верхней полосы
+short_signal = short_signal_1 or short_signal_2
+
+// Рисуем сигналы на продажу (красные треугольники ВНИЗ сверху)
+plotshape(
+     short_signal
+   , title="SHORT SIGNAL"
+   , location=location.abovebar
+   , color=color.red
+   , style=shape.triangledown
+   , size=size.small
+   )
+
+// ================ АЛЕРТЫ ================
+alertcondition(long_signal, title='LONG SIGNAL', message='Long signal detected!')
+alertcondition(short_signal, title='SHORT SIGNAL', message='Short signal detected!')
+
+// ================ ПОДПИСИ НА ГРАФИКЕ ================
+if (long_signal)
+    label.new(
+         bar_index
+       , low
+       , text="LONG"
+       , style=label.style_label_up
+       , color=color.green
+       , textcolor=color.white
+       , size=size.small
+       )
+
+if (short_signal)
+    label.new(
+         bar_index
+       , high
+       , text="SHORT"
+       , style=label.style_label_down
+       , color=color.red
+       , textcolor=color.white
+       , size=size.small
+       )
