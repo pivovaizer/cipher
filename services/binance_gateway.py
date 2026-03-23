@@ -64,24 +64,23 @@ class BinanceGateway:
         )
 
     def create_take_profit_market_order(self, symbol: str, side: str, quantity: float, stop_price: float) -> dict[str, Any]:
-        return self.client.futures_create_order(
+        return self.client.futures_create_algo_order(
             symbol=symbol,
             side=side,
             type="TAKE_PROFIT_MARKET",
-            stopPrice=stop_price,
-            quantity=quantity,
-            reduceOnly=True,
+            triggerPrice=str(stop_price),
+            quantity=str(quantity),
+            reduceOnly="true",
         )
 
     def create_stop_loss_order(self, symbol: str, side: str, quantity: float, stop_price: float) -> dict[str, Any]:
-        return self.client.futures_create_order(
+        return self.client.futures_create_algo_order(
             symbol=symbol,
             side=side,
             type="STOP_MARKET",
-            stopPrice=stop_price,
-            quantity=quantity,
-            timeInForce="GTC",
-            reduceOnly=True,
+            triggerPrice=str(stop_price),
+            quantity=str(quantity),
+            reduceOnly="true",
         )
 
     def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
