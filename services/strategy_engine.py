@@ -115,13 +115,24 @@ class StrategyEngine:
 
                 if signal:
                     if pending and pending["signal"] == signal:
-                        # Same signal again — update with better price, keep waiting
+                        # Same signal again — increment wait counter
                         pending["count"] += 1
                         pending["close"] = self.last_signals[cleaned]["close"]
-                        logger.info(
-                            "Signal %s for %s repeated (%dx), waiting for confirmation",
-                            signal, cleaned, pending["count"],
-                        )
+
+                        # Force entry if max confirmation candles reached
+                        if pending["count"] >= settings.MAX_CONFIRMATION_CANDLES:
+                            logger.info(
+                                "Max confirmation (%d) reached for %s %s, force entering",
+                                pending["count"], pending["signal"], cleaned,
+                            )
+                            await self._execute_signal(symbol, pending["signal"])
+                            open_count += 1
+                            del self._pending_signals[cleaned]
+                        else:
+                            logger.info(
+                                "Signal %s for %s repeated (%dx), waiting for confirmation",
+                                signal, cleaned, pending["count"],
+                            )
                     else:
                         # New signal (or different direction) — start tracking
                         self._pending_signals[cleaned] = {
@@ -359,5 +370,6 @@ class StrategyEngine:
                 "sl_percent": settings.STRATEGY_SL_PERCENT,
                 "type": "market",
             },
+            "max_confirmation_candles": settings.MAX_CONFIRMATION_CANDLES,
             "pending_signals": self._pending_signals,
         }

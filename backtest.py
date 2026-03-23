@@ -3,6 +3,8 @@ Backtest: Nadaraya-Watson strategy — grid search for best params.
 Usage: uv run python backtest.py
 """
 
+from datetime import datetime, timedelta, timezone
+
 from binance.client import Client
 from config import settings
 from services.indicators import klines_to_dataframe, calculate_nadaraya_watson
@@ -14,18 +16,20 @@ SYMBOLS = ["BTCUSDT", "BCHUSDT", "BNBUSDT", "XRPUSDT",
            "SANDUSDT", "MANAUSDT", "DYDXUSDT",
            "LINKUSDT", "AAVEUSDT", "ICPUSDT", "TRXUSDT"]
 TIMEFRAME = "4h"
-INVESTMENT = 10.0
+INVESTMENT = 5.0
 LEVERAGE = 30
-DEPOSIT = 120.0
-MAX_POS = 4
-KLINES_LIMIT = 1220
+DEPOSIT = 60.0
+MAX_POS = 6
+KLINES_LIMIT = 1500  # максимум Binance API
 SLIPPAGE_PCT = 0.03  # проскальзывание цены при маркет ордере
 TAKER_FEE_PCT = 0.04  # комиссия Binance Futures taker (0.04% за сторону)
+TRADE_DAYS = 30  # считать сделки только за последние N дней (0 = всё)
+MAX_CONFIRM = 2  # макс свечей подтверждения перед принудительным входом
 
 # ── Configs ──────────────────────────────────────────────────────
 CONFIGS = [
-    {"bw": 8,  "mult": 4.0, "lb": 500, "tp": 60, "sl": 20, "label": "wide     bw8 m4.0"},
-    {"bw": 10, "mult": 4.0, "lb": 500, "tp": 60, "sl": 20, "label": "safe     bw10 m4.0"},
+    {"bw": 8,  "mult": 3.0, "lb": 500, "tp": 20, "sl": 10, "label": "wide     bw8 m3.0"},
+    {"bw": 10, "mult": 4.0, "lb": 500, "tp": 20, "sl": 10, "label": "safe     bw10 m4.0"},
 ]
 
 
@@ -114,38 +118,48 @@ def backtest_symbol(df, symbol, tp_pct, sl_pct, invest, max_pos, slippage_pct, f
             signal = "short"
 
         # ── Pending signal confirmation ──
+        should_enter = False
         if signal:
             if pending_signal and pending_signal["signal"] == signal:
                 pending_signal["count"] += 1
+                # Force entry if max confirmation candles reached
+                if pending_signal["count"] >= MAX_CONFIRM:
+                    should_enter = True
             else:
                 pending_signal = {"signal": signal, "count": 1}
         else:
-            if pending_signal and len(open_positions) < max_pos:
-                side = pending_signal["signal"]
-                entry = close
-                qty = (invest * LEVERAGE) / entry
+            # No signal — enter if we had a pending one
+            if pending_signal:
+                should_enter = True
 
-                # Slippage + комиссия на вход
-                entry_cost_pct = (slippage_pct + fee_pct) / 100
-                if side == "long":
-                    entry *= (1 + entry_cost_pct)  # покупаем дороже
-                else:
-                    entry *= (1 - entry_cost_pct)  # продаём дешевле
+        if should_enter and pending_signal and len(open_positions) < max_pos:
+            side = pending_signal["signal"]
+            entry = close
+            qty = (invest * LEVERAGE) / entry
 
-                tp_offset = (invest * tp_pct / 100) / qty
-                sl_offset = (invest * sl_pct / 100) / qty
+            # Slippage + комиссия на вход
+            entry_cost_pct = (slippage_pct + fee_pct) / 100
+            if side == "long":
+                entry *= (1 + entry_cost_pct)  # покупаем дороже
+            else:
+                entry *= (1 - entry_cost_pct)  # продаём дешевле
 
-                if side == "long":
-                    tp_price = entry + tp_offset
-                    sl_price = entry - sl_offset
-                else:
-                    tp_price = entry - tp_offset
-                    sl_price = entry + sl_offset
+            tp_offset = (invest * tp_pct / 100) / qty
+            sl_offset = (invest * sl_pct / 100) / qty
 
-                open_positions.append({
-                    "side": side, "entry": entry, "qty": qty,
-                    "tp_price": tp_price, "sl_price": sl_price, "time": time,
-                })
+            if side == "long":
+                tp_price = entry + tp_offset
+                sl_price = entry - sl_offset
+            else:
+                tp_price = entry - tp_offset
+                sl_price = entry + sl_offset
+
+            open_positions.append({
+                "side": side, "entry": entry, "qty": qty,
+                "tp_price": tp_price, "sl_price": sl_price, "time": time,
+            })
+            pending_signal = None
+        elif not signal:
             pending_signal = None
 
     # Close remaining at last price
@@ -179,6 +193,11 @@ def run_config(raw_data, cfg):
             df, symbol, cfg["tp"], cfg["sl"], INVESTMENT, MAX_POS, SLIPPAGE_PCT, TAKER_FEE_PCT, cfg["lb"],
         )
         all_trades.extend(trades)
+
+    # Filter trades by period
+    if TRADE_DAYS > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=TRADE_DAYS)
+        all_trades = [t for t in all_trades if t["open_time"].replace(tzinfo=timezone.utc) >= cutoff]
 
     if not all_trades:
         return {"label": cfg["label"], "trades": 0, "tp_hits": 0, "sl_hits": 0,
@@ -229,6 +248,7 @@ def run_backtest():
     print(f"  GRID SEARCH: Nadaraya-Watson | {TIMEFRAME} | {len(SYMBOLS)} pairs")
     print(f"  Invest: ${INVESTMENT} x {LEVERAGE}x | MaxPos: {MAX_POS} | Dep: ${DEPOSIT}")
     print(f"  Fees: slippage {SLIPPAGE_PCT}% + taker fee {TAKER_FEE_PCT}% = {SLIPPAGE_PCT + TAKER_FEE_PCT}% per side")
+    print(f"  Trade period: last {TRADE_DAYS} days" if TRADE_DAYS > 0 else "  Trade period: all data")
     print(f"  Testing {len(CONFIGS)} configurations...")
     print(f"{'=' * 95}")
     print(f"\nFetching data...")
@@ -262,21 +282,21 @@ def run_backtest():
             f" {r['roi']:>+6.1f}%{marker}"
         )
 
-    # ── Top 3 details ──
-    top3 = sorted(results, key=lambda x: x["total_pnl"], reverse=True)[:3]
-    for r in top3:
-        print(f"\n{'─' * 80}")
-        print(f"  {r['label']}  |  bw={r['bw']} mult={r['mult']} TP={r['tp']}% SL={r['sl']}%")
-        print(f"  P&L: ${r['total_pnl']:+.2f}  |  WR: {r['winrate']:.1f}%  |  DD: ${r['max_dd']:.2f}  |  ROI: {r['roi']:+.1f}%")
-        print(f"{'─' * 80}")
-        for symbol in SYMBOLS:
-            sym_trades = [t for t in r["all_trades"] if t["symbol"] == symbol]
-            if sym_trades:
-                tp = len([t for t in sym_trades if t["result"] == "TP"])
-                sl = len([t for t in sym_trades if t["result"] == "SL"])
-                pnl = sum(t["pnl"] for t in sym_trades)
-                wr = len([t for t in sym_trades if t["pnl"] > 0]) / len(sym_trades) * 100
-                print(f"  {symbol:<12} | {len(sym_trades):>3} trades | TP:{tp:>2}  SL:{sl:>2} | WR:{wr:>5.1f}% | P&L: ${pnl:>+7.2f}")
+    # # ── Top 3 details ──
+    # top3 = sorted(results, key=lambda x: x["total_pnl"], reverse=True)[:3]
+    # for r in top3:
+    #     print(f"\n{'─' * 80}")
+    #     print(f"  {r['label']}  |  bw={r['bw']} mult={r['mult']} TP={r['tp']}% SL={r['sl']}%")
+    #     print(f"  P&L: ${r['total_pnl']:+.2f}  |  WR: {r['winrate']:.1f}%  |  DD: ${r['max_dd']:.2f}  |  ROI: {r['roi']:+.1f}%")
+    #     print(f"{'─' * 80}")
+    #     for symbol in SYMBOLS:
+    #         sym_trades = [t for t in r["all_trades"] if t["symbol"] == symbol]
+    #         if sym_trades:
+    #             tp = len([t for t in sym_trades if t["result"] == "TP"])
+    #             sl = len([t for t in sym_trades if t["result"] == "SL"])
+    #             pnl = sum(t["pnl"] for t in sym_trades)
+    #             wr = len([t for t in sym_trades if t["pnl"] > 0]) / len(sym_trades) * 100
+    #             print(f"  {symbol:<12} | {len(sym_trades):>3} trades | TP:{tp:>2}  SL:{sl:>2} | WR:{wr:>5.1f}% | P&L: ${pnl:>+7.2f}")
 
     print(f"\n{'=' * 95}")
 
