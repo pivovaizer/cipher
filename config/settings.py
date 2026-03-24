@@ -48,6 +48,7 @@ class Settings:
         # Strategy TP/SL (percentage of investment)
         self.STRATEGY_TP_PERCENT = float(os.getenv("STRATEGY_TP_PERCENT", "30"))
         self.STRATEGY_SL_PERCENT = float(os.getenv("STRATEGY_SL_PERCENT", "15"))
+        self.STRATEGY_TP_LIMIT_ORDER = _to_bool(os.getenv("STRATEGY_TP_LIMIT_ORDER"), False)
 
         # Strategy risk management
         self.STRATEGY_LEVERAGE = int(os.getenv("STRATEGY_LEVERAGE", "5"))

@@ -251,12 +251,17 @@ class StrategyEngine:
         await asyncio.to_thread(binance_gateway.set_leverage, cleaned, settings.STRATEGY_LEVERAGE)
         order = await asyncio.to_thread(binance_gateway.create_market_order, cleaned, side, quantity)
 
+        # Use actual fill price instead of pre-order price for accurate TP/SL
+        fill_price = float(order.get("avgPrice") or current_price)
+        if fill_price <= 0:
+            fill_price = current_price
+
         order_info = {
             "symbol": cleaned,
             "status": "open",
             "side": side,
             "quantity": quantity,
-            "entry_price": current_price,
+            "entry_price": fill_price,
             "investment": investment,
             "leverage": settings.STRATEGY_LEVERAGE,
             "order_id": order["orderId"],
@@ -264,13 +269,16 @@ class StrategyEngine:
             "filled_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        logger.info("Order placed: %s %s, order_id=%s", signal, cleaned, order.get("orderId"))
+        logger.info(
+            "Order placed: %s %s, order_id=%s, fill_price=%.6f (quote=%.6f)",
+            signal, cleaned, order.get("orderId"), fill_price, current_price,
+        )
 
         # Add to position store for background task monitoring
         self.position_store.add_order(order_info)
 
-        # Place percentage-based TP/SL with market orders
-        await self._place_strategy_tp_sl(cleaned, side, quantity, current_price, investment, order_info)
+        # Place percentage-based TP/SL
+        await self._place_strategy_tp_sl(cleaned, side, quantity, fill_price, investment, order_info)
 
     async def _calculate_investment(self) -> float:
         if settings.STRATEGY_USE_FIXED_AMOUNT:
@@ -315,10 +323,16 @@ class StrategyEngine:
 
             close_side = SIDE_SELL if side == SIDE_BUY else SIDE_BUY
 
-            tp_order = await asyncio.to_thread(
-                binance_gateway.create_take_profit_market_order,
-                symbol, close_side, quantity, tp_price,
-            )
+            if settings.STRATEGY_TP_LIMIT_ORDER:
+                tp_order = await asyncio.to_thread(
+                    binance_gateway.create_take_profit_order,
+                    symbol, close_side, quantity, tp_price,
+                )
+            else:
+                tp_order = await asyncio.to_thread(
+                    binance_gateway.create_take_profit_market_order,
+                    symbol, close_side, quantity, tp_price,
+                )
             sl_order = await asyncio.to_thread(
                 binance_gateway.create_stop_loss_order,
                 symbol, close_side, quantity, sl_price,
@@ -338,9 +352,10 @@ class StrategyEngine:
                 },
             )
 
+            tp_type = "LIMIT" if settings.STRATEGY_TP_LIMIT_ORDER else "MARKET"
             logger.info(
-                "TP/SL for %s: TP=%.4f (+%.1f%%), SL=%.4f (-%.1f%%) | entry=%.4f",
-                symbol, tp_price, settings.STRATEGY_TP_PERCENT,
+                "TP/SL for %s: TP=%.4f (+%.1f%% %s), SL=%.4f (-%.1f%% MARKET) | entry=%.4f",
+                symbol, tp_price, settings.STRATEGY_TP_PERCENT, tp_type,
                 sl_price, settings.STRATEGY_SL_PERCENT, entry_price,
             )
         except Exception:
