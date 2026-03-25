@@ -10,11 +10,7 @@ from config import settings
 from services.indicators import klines_to_dataframe, calculate_nadaraya_watson
 
 # ── Config ──────────────────────────────────────────────────────
-SYMBOLS = ["BTCUSDT", "BCHUSDT", "BNBUSDT", "XRPUSDT",
-           "DOGEUSDT", "ADAUSDT", "ZECUSDT", "AVAXUSDT",
-           "HBARUSDT", "LTCUSDT", "ALGOUSDT", "ATOMUSDT",
-           "SANDUSDT", "MANAUSDT", "DYDXUSDT",
-           "LINKUSDT", "AAVEUSDT", "ICPUSDT", "TRXUSDT"]
+SYMBOLS = settings.STRATEGY_SYMBOLS
 TIMEFRAME = "4h"
 INVESTMENT = 5.0
 LEVERAGE = 30
@@ -24,12 +20,13 @@ KLINES_LIMIT = 1500  # максимум Binance API
 SLIPPAGE_PCT = 0.03  # проскальзывание цены при маркет ордере
 TAKER_FEE_PCT = 0.04  # комиссия Binance Futures taker (0.04% за сторону)
 TRADE_DAYS = 30  # считать сделки только за последние N дней (0 = всё)
+MIN_CONFIRM = 2 # мин свечей подтверждения перед входом
 MAX_CONFIRM = 2  # макс свечей подтверждения перед принудительным входом
 
 # ── Configs ──────────────────────────────────────────────────────
 CONFIGS = [
-    {"bw": 8,  "mult": 3.0, "lb": 500, "tp": 20, "sl": 10, "label": "wide     bw8 m3.0"},
-    {"bw": 10, "mult": 4.0, "lb": 500, "tp": 20, "sl": 10, "label": "safe     bw10 m4.0"},
+    {"bw": 8,  "mult": 3.0, "lb": 500, "tp": 30, "sl": 10, "label": "wide     bw8 m3.0"},
+    {"bw": 10, "mult": 4.0, "lb": 500, "tp": 30, "sl": 10, "label": "safe     bw10 m4.0"},
 ]
 
 
@@ -128,9 +125,12 @@ def backtest_symbol(df, symbol, tp_pct, sl_pct, invest, max_pos, slippage_pct, f
             else:
                 pending_signal = {"signal": signal, "count": 1}
         else:
-            # No signal — enter if we had a pending one
+            # No signal — enter only if minimum confirmations met
             if pending_signal:
-                should_enter = True
+                if pending_signal["count"] >= MIN_CONFIRM:
+                    should_enter = True
+                else:
+                    pending_signal = None
 
         if should_enter and pending_signal and len(open_positions) < max_pos:
             side = pending_signal["signal"]

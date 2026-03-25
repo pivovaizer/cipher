@@ -145,14 +145,21 @@ class StrategyEngine:
                             signal, cleaned,
                         )
                 else:
-                    # No signal — if we had a pending one, NOW we execute it
+                    # No signal — execute pending only if minimum confirmations met
                     if pending:
-                        logger.info(
-                            "Confirmed %s for %s after %d signals, executing at market",
-                            pending["signal"], cleaned, pending["count"],
-                        )
-                        await self._execute_signal(symbol, pending["signal"])
-                        open_count += 1
+                        if pending["count"] >= settings.MIN_CONFIRMATION_CANDLES:
+                            logger.info(
+                                "Confirmed %s for %s after %d signals, executing at market",
+                                pending["signal"], cleaned, pending["count"],
+                            )
+                            await self._execute_signal(symbol, pending["signal"])
+                            open_count += 1
+                        else:
+                            logger.info(
+                                "Signal %s for %s disappeared after %d candle(s), need %d — discarding",
+                                pending["signal"], cleaned, pending["count"],
+                                settings.MIN_CONFIRMATION_CANDLES,
+                            )
                         del self._pending_signals[cleaned]
 
             except Exception:
@@ -314,12 +321,21 @@ class StrategyEngine:
                 tp_price = entry_price - tp_offset
                 sl_price = entry_price + sl_offset
 
-            # Ensure prices are positive (can go negative on cheap coins with high SL%)
-            tp_price = max(tp_price, 0.0001)
-            sl_price = max(sl_price, 0.0001)
-
             tp_price = round_price_with_precision(tp_price, symbol)
             sl_price = round_price_with_precision(sl_price, symbol)
+
+            # Ensure prices are positive after rounding
+            if tp_price <= 0 or sl_price <= 0:
+                logger.error(
+                    "TP/SL price <= 0 after rounding for %s: tp=%.8f sl=%.8f (entry=%.6f, offset tp=%.8f sl=%.8f)",
+                    symbol, tp_price, sl_price, entry_price, tp_offset, sl_offset,
+                )
+                return
+
+            logger.info(
+                "TP/SL for %s %s: entry=%.6f tp=%.6f sl=%.6f",
+                side, symbol, entry_price, tp_price, sl_price,
+            )
 
             close_side = SIDE_SELL if side == SIDE_BUY else SIDE_BUY
 

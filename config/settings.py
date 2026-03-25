@@ -56,6 +56,7 @@ class Settings:
         self.STRATEGY_FIXED_AMOUNT = float(os.getenv("STRATEGY_FIXED_AMOUNT", "5"))
         self.RISK_PER_TRADE_PERCENT = float(os.getenv("RISK_PER_TRADE_PERCENT", "1.0"))
         self.MAX_CONCURRENT_POSITIONS = int(os.getenv("MAX_CONCURRENT_POSITIONS", "3"))
+        self.MIN_CONFIRMATION_CANDLES = int(os.getenv("MIN_CONFIRMATION_CANDLES", "2"))
         self.MAX_CONFIRMATION_CANDLES = int(os.getenv("MAX_CONFIRMATION_CANDLES", "2"))
 
         self._validate()
