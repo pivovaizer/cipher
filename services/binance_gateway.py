@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Any
 
 from binance.client import Client
@@ -118,11 +119,7 @@ class BinanceGateway:
         return float(price_filter["tickSize"])
 
     def round_to_tick(self, price: float, tick_size: float) -> float:
-        tick_str = str(tick_size)
-        if "." in tick_str:
-            precision = len(tick_str.split(".")[1].rstrip("0"))
-        else:
-            precision = 0
+        precision = max(0, -int(math.floor(math.log10(tick_size))))
         rounded = round(price / tick_size) * tick_size
         return round(rounded, precision)
 
